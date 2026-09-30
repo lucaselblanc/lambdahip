@@ -35,7 +35,7 @@
 
 ## Notice
 
- An experimental HIP backend for NVIDIA/CUDA is available with `make USE_HIP=1` and `--gpu`. Build and validation instructions are in [GPU.md](GPU.md); GPU performance has not been measured yet.
+ An experimental HIP backend for NVIDIA/CUDA is available with `make USE_HIP=1` and `--gpu`. GPU performance has not been measured yet.
 
 ## Description
 
