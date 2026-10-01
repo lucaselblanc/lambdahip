@@ -256,6 +256,8 @@ Interval (2010)](https://eprint.iacr.org/2010/615.pdf)
 2. Install the necessary libraries:
     ```bash
     sudo apt update
+    sudo apt update
+    sudo apt install hipcc
     sudo apt install build-essential -y
     sudo apt install boost-headers -y
     sudo apt install libssl-dev -y
