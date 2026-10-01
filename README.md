@@ -72,20 +72,11 @@ modular equation allows recovery through modular inversion.
 </details>
 
 ```
-5 bits ≈ 00:00:00
-10 bits ≈ 00:00:00
-15 bits ≈ 00:00:00
-20 bits ≈ 00:00:00
-25 bits ≈ 00:00:00
-30 bits ≈ 00:00:00
-35 bits ≈ 00:00:00
-40 bits ≈ 00:00:00
-45 bits ≈ 00:00:00
-50 bits ≈ 00:00:00
-55 bits ≈ 00:00:04
-60 bits ≈ 00:00:07
-65 bits ≈ 00:00:43
-70 bits ≈ 00:01:09
+//Available Soon!
+55 bits ≈ 00:00:**
+60 bits ≈ 00:00:**
+65 bits ≈ 00:00:**
+70 bits ≈ 00:00:**
 ```
 
 ## Average k-Factor
