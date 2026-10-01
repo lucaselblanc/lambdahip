@@ -62,7 +62,7 @@ avalanche mixing.
 When two walkers reach the same point with different coefficients, a
 modular equation allows recovery through modular inversion.
 
-## Benchmark CPU v5e-8 224 cores
+## Benchmark GPU NVidia RTX 5090
 
 <details>
 <summary><strong>  Note:</strong></summary>
