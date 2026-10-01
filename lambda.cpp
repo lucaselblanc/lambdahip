@@ -1291,16 +1291,23 @@ uint256_t lambda(std::string target_pubkey_hex, int key_range, int WALKERS, int 
 
     std::thread progress_thread([&]() {
         const long double M = ldexpl(1.0L, key_range);
+        uint64_t last_iters_print = total_iters.load(std::memory_order_relaxed);
         while (search_in_progress.load(std::memory_order_acquire)) {
             auto now = std::chrono::steady_clock::now();
-            if (now - last_print >= std::chrono::seconds(10)) {
+            auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_print).count();
+            if (duration_ms >= 1000) {
                 long double k = (long double)total_iters.load(std::memory_order_relaxed);
                 long double x = (k * k) / (2.0L * M);
                 long double d = x;
                 long double prob = (1.0L - expl(-d)) * 100.0L;
                 std::string snapointStatus = snapoint_path.empty() ? "Off" : (resumed_snapoint ? "Restored/" : "") + std::to_string(snapoint_saves.load(std::memory_order_relaxed));
                 if (snapoint_errors.load(std::memory_order_relaxed) > 0) snapointStatus += " Err:" + std::to_string(snapoint_errors.load(std::memory_order_relaxed));
-                std::cout << CYAN << "\033[3A\r" << "\033[2KTotal Ops/10s: " << RESET << GREEN << total_iters.load() << RESET << "\n" << CYAN << "\033[2KSelf-Collision Cycles: " << RESET << GREEN << total_cycles.load() << RESET << "\n" << CYAN << "\033[2KCollision Probability: " << RESET << GREEN << std::fixed << std::setprecision(8) << (prob) << "...%" << RESET << CYAN << " | Snapoints: " << RESET << PINK << snapointStatus << RESET << "\n" << std::flush;
+                
+                uint64_t current_iters = total_iters.load(std::memory_order_relaxed);
+                uint64_t ops_per_sec = (current_iters - last_iters_print) * 1000 / duration_ms;
+                last_iters_print = current_iters;
+
+                std::cout << CYAN << "\033[3A\r" << "\033[2KOps/s: " << RESET << GREEN << ops_per_sec << RESET << "\n" << CYAN << "\033[2KSelf-Collision Cycles: " << RESET << GREEN << total_cycles.load() << RESET << "\n" << CYAN << "\033[2KCollision Probability: " << RESET << GREEN << std::fixed << std::setprecision(8) << (prob) << "...%" << RESET << CYAN << " | Snapoints: " << RESET << PINK << snapointStatus << RESET << "\n" << std::flush;
                 last_print = now;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -1446,7 +1453,6 @@ std::string HexToWif(const std::string& hexKey) {
     return EncodeBase58Check(payload);
 }
 
-/*
 int main(int argc, char* argv[]) {
     std::string pub_key_hex;
     int key_range;
@@ -1581,187 +1587,5 @@ int main(int argc, char* argv[]) {
     delete[] jacNormH;
     delete[] jacEndo;
     delete[] jacEndoH;
-    return 0;
-}
-*/
-
-int main(int argc, char* argv[]) {
-    std::string pub_key_hex;
-    int key_range = 0;
-    int walkers = 0;
-    int dp = -1;
-    std::string snapoint_path;
-    bool use_gpu = false;
-    int total_runs = 4000;
-
-    if (argc == 1) {
-        std::cout << "The Parameters Cannot Be Empty!" << std::endl;
-        return 1;
-    }
-
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-
-        if (arg == "--pubkey" && i + 1 < argc) {
-            pub_key_hex = argv[++i];
-        } else if (arg == "--keyrange" && i + 1 < argc) {
-            key_range = std::stoi(argv[++i]);
-        } else if (arg == "--walkers" && i + 1 < argc) {
-            walkers = std::stoi(argv[++i]);
-        } else if (arg == "--dp" && i + 1 < argc) {
-            dp = std::stoi(argv[++i]);
-        } else if (arg == "--snaptime" && i + 1 < argc) {
-            snaptime_sec = std::stoi(argv[++i]);
-        } else if (arg == "--t" && i + 1 < argc) {
-            cores = std::stoi(argv[++i]);
-        } else if (arg == "--gpu") {
-            use_gpu = true;
-        } else if (arg == "--runs" && i + 1 < argc) {
-            total_runs = std::stoi(argv[++i]);
-        } else if (arg == "--snapoint" && i + 1 < argc) {
-            snapoint_path = argv[++i];
-        } else {
-            std::cerr << "Usage: " << argv[0]
-                      << " --pubkey HEX --keyrange BITS --walkers COUNT [--dp BITS]"
-                      << " [--gpu] [--runs COUNT] [--snapoint FILE] [--snaptime SECONDS] [--t THREADS]\n";
-            return 1;
-        }
-    }
-
-    if (pub_key_hex.length() != 66 ||
-        (pub_key_hex.substr(0, 2) != "02" && pub_key_hex.substr(0, 2) != "03") ||
-        key_range < 2 || key_range > 256 || walkers <= 0 || total_runs <= 0 || snaptime_sec < 0) {
-        std::cerr << RED << "[ERROR] Invalid public key or walk parameters." << RESET << std::endl;
-        return 1;
-    }
-
-    if (use_gpu) {
-#ifdef USE_HIP
-        if (!hip_walk::available()) {
-            std::cerr << RED << "[ERROR] HIP GPU unavailable: " << hip_walk::last_error() << RESET << std::endl;
-            return 1;
-        }
-#else
-        std::cerr << RED << "[ERROR] Build with make USE_HIP=1 to use --gpu." << RESET << std::endl;
-        return 1;
-#endif
-    }
-
-    if (dp <= 0 || dp > static_cast<int>(sizeof(int32_t) * CHAR_BIT)) {
-        std::cerr << ORANGE << "[INFO] " << RESET << GREEN << "Setting DP automatically..." << RESET << std::endl;
-        dp = std::max<int>(1, std::min<int>(key_range >> 2, static_cast<int>(sizeof(int32_t) * CHAR_BIT)));
-    }
-
-    if (snapoint_path.empty()) {
-        snapoint_path = pub_key_hex + ".saved";
-    }
-
-    init_secp256k1(key_range);
-
-    long double sum_kfactor = 0.0L;
-    std::vector<long double> k_values;
-    k_values.reserve(total_runs);
-
-    for (int run = 0; run < total_runs; run++) {
-
-        std::cout << CYAN 
-                  << "\n[RUN " << (run + 1) << "/" << total_runs << "]"
-                  << RESET << std::endl;
-
-        uint256_t found_key;
-        try {
-        found_key = lambda(
-            pub_key_hex,
-            key_range,
-            walkers,
-            dp,
-            snapoint_path,
-            snaptime_sec,
-            use_gpu
-        );
-        } catch (const std::exception& e) {
-            std::cerr << RED << "[ERROR] " << e.what() << RESET << std::endl;
-            return 1;
-        }
-
-        unsigned char test_pub[33];
-        generatePublicKey(preCompG, preCompGphi, test_pub, found_key.limbs, windowSize);
-        auto target_pubkey = hex_to_bytes(pub_key_hex);
-        if (memcmp(test_pub, target_pubkey.data(), 33) != 0) {
-            std::cerr << RED << "[ERROR] Search ended without a verified key." << RESET << std::endl;
-            return 1;
-        }
-        if (run == 0) save_key(pub_key_hex, found_key);
-
-        long double current_k = kFactor;
-
-        k_values.push_back(current_k);
-        sum_kfactor += current_k;
-
-        std::cout << GREEN 
-                  << "[Collision " << (run + 1) << "] "
-                  << RESET
-                  << "K-Factor: "
-                  << PINK
-                  << std::fixed
-                  << std::setprecision(8)
-                  << (double)current_k
-                  << RESET
-                  << std::endl;
-    }
-
-    long double average_k = sum_kfactor / total_runs;
-
-    std::sort(k_values.begin(), k_values.end());
-
-    long double median_k;
-
-    if (total_runs % 2 == 0) {
-        median_k = (k_values[total_runs / 2 - 1] + k_values[total_runs / 2]) / 2.0L;
-    } else {
-        median_k = k_values[total_runs / 2];
-    }
-
-    std::cout << "\n"
-          << BLUE << "---------------------------------------------------------------------------"
-          << RESET << std::endl;
-
-std::cout << CYAN 
-          << "[RESULT] Average K-Factor (" 
-          << total_runs 
-          << " runs): "
-          << RESET
-          << PINK
-          << std::fixed
-          << std::setprecision(8)
-          << (double)average_k
-          << RESET
-          << std::endl;
-
-std::cout << CYAN 
-          << "[RESULT] Median K-Factor (" 
-          << total_runs 
-          << " runs): "
-          << RESET
-          << GREEN
-          << std::fixed
-          << std::setprecision(8)
-          << (double)median_k
-          << RESET
-          << std::endl;
-
-std::cout << BLUE << "---------------------------------------------------------------------------"
-          << RESET << std::endl;
-
-
-    delete[] preCompG;
-    delete[] preCompGphi;
-    delete[] preCompH;
-    delete[] preCompHphi;
-    delete[] jacNorm;
-    delete[] jacNormH;
-    delete[] jacEndo;
-    delete[] jacEndoH;
-
     return 0;
 }
