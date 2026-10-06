@@ -5,37 +5,37 @@
 
 ## Fast Links:
 
-[Main Index](https://github.com/lucaselblanc/pollardslambda/tree/main?tab=readme-ov-file#pollards-lambda-algorithm-for-secp256k1-curve-%CF%81%CE%BB)
+[Main Index](https://github.com/lucaselblanc/lambdahip/tree/main?tab=readme-ov-file#pollards-lambda-algorithm-for-secp256k1-curve-%CF%81%CE%BB)
 
-[Description](https://github.com/lucaselblanc/pollardslambda/tree/main?tab=readme-ov-file#description)
+[Description](https://github.com/lucaselblanc/lambdahip/tree/main?tab=readme-ov-file#description)
 
-[Benchmark](https://github.com/lucaselblanc/pollardslambda/tree/main#benchmark-tpu-v5e-8)
+[Benchmark](https://github.com/lucaselblanc/lambdahip/tree/main#benchmark-tpu-v5e-8)
 
-[Average K Factor](https://github.com/lucaselblanc/pollardslambda/tree/main#average-k-factor)
+[Average K Factor](https://github.com/lucaselblanc/lambdahip/tree/main#average-k-factor)
 
-[Technical Features](https://github.com/lucaselblanc/pollardslambda/tree/main#technical-features)
+[Technical Features](https://github.com/lucaselblanc/lambdahip/tree/main#technical-features)
 
-[Distinguished Points](https://github.com/lucaselblanc/pollardslambda/tree/main#distinguished-points-dp)
+[Distinguished Points](https://github.com/lucaselblanc/lambdahip/tree/main#distinguished-points-dp)
 
-[Delay Of Distinguished Points](https://github.com/lucaselblanc/pollardslambda/tree/main#delay-of-distinguished-points)
+[Delay Of Distinguished Points](https://github.com/lucaselblanc/lambdahip/tree/main#delay-of-distinguished-points)
 
-[Algorithm Complexity](https://github.com/lucaselblanc/pollardslambda/tree/main#algorithm-complexity)
+[Algorithm Complexity](https://github.com/lucaselblanc/lambdahip/tree/main#algorithm-complexity)
 
-[Negation Map](https://github.com/lucaselblanc/pollardslambda/tree/main#negation-map)
+[Negation Map](https://github.com/lucaselblanc/lambdahip/tree/main#negation-map)
 
-[Academic Paper References](https://github.com/lucaselblanc/pollardslambda/tree/main#academic-references)
+[Academic Paper References](https://github.com/lucaselblanc/lambdahip/tree/main#academic-references)
 
-[Prerequisites](https://github.com/lucaselblanc/pollardslambda/tree/main#prerequisites)
+[Prerequisites](https://github.com/lucaselblanc/lambdahip/tree/main#prerequisites)
 
-[Installation](https://github.com/lucaselblanc/pollardslambda/tree/main#installation)
+[Installation](https://github.com/lucaselblanc/lambdahip/tree/main#installation)
 
-[Commands](https://github.com/lucaselblanc/pollardslambda/tree/main#commands)
+[Commands](https://github.com/lucaselblanc/lambdahip/tree/main#commands)
 
-[External Libraries Used](https://github.com/lucaselblanc/pollardslambda/tree/main#external-libraries-used)
+[External Libraries Used](https://github.com/lucaselblanc/lambdahip/tree/main#external-libraries-used)
 
 ## Notice
 
- An experimental HIP backend for NVIDIA/CUDA is available with `make USE_HIP=1` and `--gpu`. GPU performance has not been measured yet.
+ An experimental HIP backend for NVIDIA/CUDA is available with `make USE_HIP=1`. GPU performance has not been measured yet.
 
 ## Description
 
@@ -250,7 +250,7 @@ Interval (2010)](https://eprint.iacr.org/2010/615.pdf)
 
 1. Clone this repository:
     ```bash
-    ~/$ git clone https://github.com/lucaselblanc/pollardslambda.git
+    ~/$ git clone https://github.com/lucaselblanc/lambdahip.git
     ```
 
 2. Install the necessary libraries:
@@ -265,7 +265,7 @@ Interval (2010)](https://eprint.iacr.org/2010/615.pdf)
 
 3. Compile the project:
     ```bash
-    ~/$cd pollardslambda
+    ~/$cd lambdahip
     ```
 
     To compile and run with the HIP backend (for NVIDIA/CUDA and AMD GPUs), use `make USE_HIP=1` and add `HIP_PLATFORM=amd` or `HIP_PLATFORM=nvidia`:
@@ -287,7 +287,7 @@ Interval (2010)](https://eprint.iacr.org/2010/615.pdf)
 
     Example usage (GPU):
     ```bash
-    ~/pollardslambda$ ./lambda-hip --pubkey 02145d2611c823a396ef6712ce0f712f09b9b4f3135e3e0aa3230fb9b6d08d1e16 --keyrange 135 --walkers 1000000 --dp 12 --t 8 --snaptime 15
+    ~/lambdahip$ ./lambda-hip --pubkey 02145d2611c823a396ef6712ce0f712f09b9b4f3135e3e0aa3230fb9b6d08d1e16 --keyrange 135 --walkers 1000000 --dp 12 --t 8 --snaptime 15
     ```
 
 ## Commands
@@ -295,7 +295,7 @@ Interval (2010)](https://eprint.iacr.org/2010/615.pdf)
  The random walk begins using the public point of the compressed public key as the parameter H, the target private key range for initializing the initial probability space, and the optional distinguished points parameter, which will be calculated automatically if not defined:
 
 ```bash
-~/pollardslambda$ ./lambda-hip <compressed public key> <key range> <walkers> <dp bits> <threads> <snaptime>
+~/lambdahip$ ./lambda-hip <compressed public key> <key range> <walkers> <dp bits> <threads> <snaptime>
 ```
 
 --pubkey: The public key derived from the private key (discrete logarithm k) G = Q.
@@ -319,7 +319,7 @@ Interval (2010)](https://eprint.iacr.org/2010/615.pdf)
 
 Contributions are welcome! Feel free to open issues or submit pull requests.
 
-## Add a Star: <a href="https://github.com/lucaselblanc/pollardslambda/stargazers"><img src="https://img.shields.io/github/stars/lucaselblanc/pollardslambda?style=flat-square" alt="GitHub stars" style="vertical-align: bottom; width: 65px; height: auto;"></a>
+## Add a Star: <a href="https://github.com/lucaselblanc/lambdahip/stargazers"><img src="https://img.shields.io/github/stars/lucaselblanc/pollardslambda?style=flat-square" alt="GitHub stars" style="vertical-align: bottom; width: 65px; height: auto;"></a>
 
 ## Donations: bc1pxqwuyfwvttjgttfmpt0gk0n7yzw3k7cyzzpc3rsc4lumr8ywythsj0rrhd
 
