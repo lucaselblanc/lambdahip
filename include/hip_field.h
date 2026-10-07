@@ -180,7 +180,7 @@ LAMBDA_HD U256 mul(U256 a_in, U256 b_in) {
 #if defined(__CUDA_ARCH__)
     uint32_t t16;
     asm volatile(
-        ".reg .u32 t<17>;\n\t"
+        "{ .reg .u32 t<17>;\n\t"
         ".reg .u32 l, h, c;\n\t"
         ".reg .u32 m;\n\t"
         "mov.u32 t0, 0;\n\t"
@@ -936,7 +936,7 @@ LAMBDA_HD U256 mul(U256 a_in, U256 b_in) {
         "mov.u32 %5, t13;\n\t"
         "mov.u32 %6, t14;\n\t"
         "mov.u32 %7, t15;\n\t"
-        "mov.u32 %8, t16;\n\t"
+        "mov.u32 %8, t16; }"
         : "=r"(r_out.v[0]), "=r"(r_out.v[1]), "=r"(r_out.v[2]), "=r"(r_out.v[3]),
           "=r"(r_out.v[4]), "=r"(r_out.v[5]), "=r"(r_out.v[6]), "=r"(r_out.v[7]),
           "=r"(t16)
