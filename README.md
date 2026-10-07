@@ -323,7 +323,7 @@ Interval (2010)](https://eprint.iacr.org/2010/615.pdf)
 
 ## External Libraries Used
 
-"secp256k1.h" ```Lucas Leblanc```
+"secp256k1.h", "hip*.h" ```Lucas Leblanc```
 "parallel_hashmap/phmap.h" ```Gregory Popovitch```
 
 ## Contributing
