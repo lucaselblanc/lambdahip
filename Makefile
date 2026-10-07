@@ -8,7 +8,7 @@ LDLIBS    := -lpthread -ldl -lrt -lcrypto
 SRC_CPP   := src/modinv.cpp src/lambda.cpp src/secp256k1.cpp
 OBJ       := $(SRC_CPP:.cpp=.o) src/hip_bridge_gpu.o
 
-CXXFLAGS  ?= -g -O1 -std=c++14 -pthread -Iinclude -MD -Wall
+CXXFLAGS  ?= -g -O1 -std=c++14 -pthread -Iinclude -MD -Wall -Wno-deprecated-declarations
 HIPFLAGS  ?= -g -O1 -std=c++14 -Iinclude -MD
 
 LINKER    := $(HIPCC)
