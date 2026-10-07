@@ -35,7 +35,10 @@ all: $(TARGET)
 CXXFLAGS  += -g -O1 -std=c++14 -pthread -Iinclude -MD
 
 src/hip_bridge_gpu.o: src/hip_bridge.hip include/hip_bridge.h include/hip_field.h
-	$(HIPCC) -x $(HIP_SOURCE_LANGUAGE) $(filter-out -pthread,$(CXXFLAGS)) -c $< -o $@
+	$(HIPCC) -x $(HIP_SOURCE_LANGUAGE) \
+	$(filter-out -pthread,$(CXXFLAGS)) \
+	-I$(HIP_PATH)/include \
+	-c $< -o $@
 
 %.hiphost.o: %.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
