@@ -146,6 +146,7 @@ __global__ void walk_kernel(State* states, const StepsSoA* steps, Result* result
             }
         }
     }
+    if (id < count) states[id] = s;
 #else
     if (id >= count) return;
     State s = states[id];
