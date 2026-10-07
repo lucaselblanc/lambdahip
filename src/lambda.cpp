@@ -1139,11 +1139,9 @@ uint256_t lambda(std::string target_pubkey_hex, int key_range, int WALKERS, int 
                 if (!hip_walk::advance(gpu_context, 100000, DP_BITS, events)) {
                     throw std::runtime_error(hip_walk::last_error());
                 }
-                uint64_t assumed_steps = (uint64_t)WALKERS * 100000;
-                for (const auto& event : events) {
-                    assumed_steps -= (100000 - event.steps_done);
-                }
-                total_iters.fetch_add(assumed_steps, std::memory_order_relaxed);
+                uint64_t steps_done = 0;
+                for (const auto& event : events) steps_done += event.steps_done;
+                total_iters.fetch_add(steps_done, std::memory_order_relaxed);
 
                 for (size_t i = 0; i < events.size() && search_in_progress.load(std::memory_order_acquire); ++i) {
                     const auto& event = events[i];
@@ -1152,7 +1150,7 @@ uint256_t lambda(std::string target_pubkey_hex, int key_range, int WALKERS, int 
                     if (event.kind == 2) {
                         reset(w, w->walk_id % 2 == 0);
                         total_cycles.fetch_add(1, std::memory_order_relaxed);
-                        if (!hip_walk::write_state(gpu_context, event.walker_id, to_gpu_state(*w))) {
+                        if (!hip_walk::write_state(gpu_context, static_cast<uint32_t>(i), to_gpu_state(*w))) {
                             throw std::runtime_error(hip_walk::last_error());
                         }
                         continue;
@@ -1162,7 +1160,7 @@ uint256_t lambda(std::string target_pubkey_hex, int key_range, int WALKERS, int 
                     uint64_t x[4];
                     hip_field::to64(x, event.x);
                     if (process_dp(w, x)) {
-                        if (!hip_walk::write_state(gpu_context, event.walker_id, to_gpu_state(*w))) {
+                        if (!hip_walk::write_state(gpu_context, static_cast<uint32_t>(i), to_gpu_state(*w))) {
                             throw std::runtime_error(hip_walk::last_error());
                         }
                     }
