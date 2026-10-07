@@ -240,6 +240,7 @@ bool available() {
     return true;
 }
 Context* create(const std::vector<State>& states, const std::vector<Step>& steps) {
+    if (!available()) return nullptr;
     if (states.empty() || states.size() > 0xffffffffu || steps.size() != 2048) {
         error_text = "GPU requires at least one walker and exactly 2048 steps";
         return nullptr;
