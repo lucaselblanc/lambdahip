@@ -151,7 +151,7 @@ LAMBDA_HD void mont_mac_word(uint32_t a, uint32_t b, uint32_t word,
         "addc.u32 h, h, 0;\n\t"
         "mov.b32 %0, l; mov.b32 %1, h; }"
         : "=r"(lo), "=r"(hi)
-        : "r"(a), "r"(b), "l"(uint64_t(word)), "r"(carry));
+        : "r"(a), "r"(b), "r"(word), "r"(carry));
     *low = lo;
     *high = hi;
 }
