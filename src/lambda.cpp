@@ -686,7 +686,7 @@ void batchJacobianToAffine(ECPointAffine* aff_out, const ECPointJacobian* jac_in
     }
 }
 
-uint256_t lambda(std::string target_pubkey_hex, int key_range, int WALKERS, int DP_BITS, const std::string& snapoint_path, int snaptime_sec, bool use_gpu = false) {
+uint256_t lambda(std::string target_pubkey_hex, int key_range, int WALKERS, int DP_BITS, const std::string& snapoint_path, int snaptime_sec) {
     std::atomic<bool> search_in_progress(true);
     std::atomic<int> loaded_walkers{0};
     std::atomic<unsigned long long> total_iters{0};
@@ -1100,7 +1100,6 @@ uint256_t lambda(std::string target_pubkey_hex, int key_range, int WALKERS, int 
         hip_field::to64(w.snapshot_x, state.snapshot_x);
         w.snapshot_steps = state.snapshot_steps;
     };
-    if (use_gpu) {
         std::vector<hip_walk::State> initial_states;
         initial_states.reserve(walkers_state.size());
         for (const WalkState& w : walkers_state) initial_states.push_back(to_gpu_state(w));
@@ -1115,7 +1114,6 @@ uint256_t lambda(std::string target_pubkey_hex, int key_range, int WALKERS, int 
         }
         gpu_context = hip_walk::create(initial_states, gpu_steps);
         if (!gpu_context) throw std::runtime_error(hip_walk::last_error());
-    }
     std::string gpu_error;
     auto gpu_worker = [&]() {
         try {
