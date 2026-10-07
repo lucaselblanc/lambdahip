@@ -10,7 +10,7 @@ OBJ       := $(SRC_CPP:.cpp=.o) src/hip_bridge_gpu.o
 
 CXXFLAGS  ?= -g -O1 -std=c++14 -pthread -Iinclude -MD -Wall -Wno-deprecated-declarations
 HIPFLAGS  ?= -g -O1 -std=c++14 -Iinclude -MD
-LINKFLAGS ?= -g -O1
+LINKFLAGS ?= -g -O1 -L/usr/local/nvidia/lib64
 
 LINKER    := $(HIPCC)
 HIP_PLATFORM ?= amd
