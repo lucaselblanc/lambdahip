@@ -1139,9 +1139,11 @@ uint256_t lambda(std::string target_pubkey_hex, int key_range, int WALKERS, int 
                 if (!hip_walk::advance(gpu_context, 100000, DP_BITS, events)) {
                     throw std::runtime_error(hip_walk::last_error());
                 }
-                uint64_t steps_done = 0;
-                for (const auto& event : events) steps_done += event.steps_done;
-                total_iters.fetch_add(steps_done, std::memory_order_relaxed);
+                uint64_t assumed_steps = (uint64_t)WALKERS * 100000;
+                for (const auto& event : events) {
+                    assumed_steps -= (100000 - event.steps_done);
+                }
+                total_iters.fetch_add(assumed_steps, std::memory_order_relaxed);
 
                 for (size_t i = 0; i < events.size() && search_in_progress.load(std::memory_order_acquire); ++i) {
                     const auto& event = events[i];
