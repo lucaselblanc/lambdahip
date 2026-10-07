@@ -10,6 +10,7 @@ OBJ       := $(SRC_CPP:.cpp=.o) src/hip_bridge_gpu.o
 
 CXXFLAGS  ?= -g -O1 -std=c++14 -pthread -Iinclude -MD -Wall -Wno-deprecated-declarations
 HIPFLAGS  ?= -g -O1 -std=c++14 -Iinclude -MD
+LINKFLAGS ?= -g -O1
 
 LINKER    := $(HIPCC)
 HIP_PLATFORM ?= amd
@@ -34,7 +35,7 @@ src/hip_bridge_gpu.o: src/hip_bridge.hip include/hip_bridge.h include/hip_field.
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(TARGET): $(OBJ)
-	$(LINKER) $(CXXFLAGS) $(OBJ) -o $@ $(LDLIBS)
+	$(LINKER) $(LINKFLAGS) $(OBJ) -o $@ $(LDLIBS)
 
 gpu-disasm: lambda-hip
 	$(CUOBJDUMP) --dump-sass ./lambda-hip > lambda-hip.sass
