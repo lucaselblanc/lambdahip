@@ -255,15 +255,26 @@ Interval (2010)](https://eprint.iacr.org/2010/615.pdf)
 
 2. Install the necessary libraries:
     ```bash
+    //NVIDIA:
     sudo apt update
+    sudo apt install hip-dev -y
+    sudo apt install hip-runtime-nvidia -y
+    sudo apt install build-essential -y
+    sudo apt install boost-headers -y
+    sudo apt install libssl-dev -y
+
+    //AMD:
+    ```
+    First -> [ROCm Install](https://rocm.docs.amd.com/projects/install-on-linux/en/docs-6.3.1/install/quick-start.html)
+    ```bash
     sudo apt update
-    sudo apt install hipcc
+    sudo apt install hipcc -y
     sudo apt install build-essential -y
     sudo apt install boost-headers -y
     sudo apt install libssl-dev -y
     ```
 
-3. Compile the project:
+4. Compile the project:
     ```bash
     ~/$cd lambdahip
     ```
@@ -278,7 +289,7 @@ Interval (2010)](https://eprint.iacr.org/2010/615.pdf)
     ~/pollardslambda$ make USE_HIP=1 HIP_PLATFORM=nvidia
     ```
 
-4. Run the program:
+5. Run the program:
     ```bash
     ~/pollardslambda$ ./lambda-hip <compressed public key(hex)> <key range(int)> <walkers(int)> <OPTIONAL DP(int)> <OPTIONAL Threads(int)> <OPTIONAL snaptime(int)>
     ```
