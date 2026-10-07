@@ -1136,7 +1136,7 @@ uint256_t lambda(std::string target_pubkey_hex, int key_range, int WALKERS, int 
                     continue;
                 }
 
-                if (!hip_walk::advance(gpu_context, 100000, DP_BITS, events)) {
+                if (!hip_walk::advance(gpu_context, 1000000, DP_BITS, events)) {
                     throw std::runtime_error(hip_walk::last_error());
                 }
                 uint64_t steps_done = 0;
@@ -1150,7 +1150,7 @@ uint256_t lambda(std::string target_pubkey_hex, int key_range, int WALKERS, int 
                     if (event.kind == 2) {
                         reset(w, w->walk_id % 2 == 0);
                         total_cycles.fetch_add(1, std::memory_order_relaxed);
-                        if (!hip_walk::write_state(gpu_context, static_cast<uint32_t>(i), to_gpu_state(*w))) {
+                        if (!hip_walk::write_state(gpu_context, event.walker_id, to_gpu_state(*w))) {
                             throw std::runtime_error(hip_walk::last_error());
                         }
                         continue;
@@ -1160,7 +1160,7 @@ uint256_t lambda(std::string target_pubkey_hex, int key_range, int WALKERS, int 
                     uint64_t x[4];
                     hip_field::to64(x, event.x);
                     if (process_dp(w, x)) {
-                        if (!hip_walk::write_state(gpu_context, static_cast<uint32_t>(i), to_gpu_state(*w))) {
+                        if (!hip_walk::write_state(gpu_context, event.walker_id, to_gpu_state(*w))) {
                             throw std::runtime_error(hip_walk::last_error());
                         }
                     }
