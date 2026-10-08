@@ -121,40 +121,30 @@ __global__ void walk_kernel(State* states, const StepsSoA* steps, Result* result
                 s.snapshot_steps = 0;
                 for (int j = 0; j < 8; ++j) s.snapshot_x.v[j] = 0xffffffffu;
                 escaping = true;
-            } else if (hip_field::equal(x, s.snapshot_x)) {
-                uint32_t escape = uint32_t(avalanche(word64(x,1) ^ 0xCAFEBABEULL)) & 255u;
-                Point eq;
-                eq.x = s_steps.x[escape];
-                eq.y = s_steps.y[escape];
-                eq.z = s_steps.z[escape];
-                eq.infinity = s_steps.inf[escape];
-                s.point = hip_field::mixed_add(s.point, eq);
-                s.a = hip_field::scalar_add(s.a, s_steps.a[escape]);
-                s.last_jump = 0xffffffffu;
-                s.snapshot_steps = 0;
-                for (int j = 0; j < 8; ++j) s.snapshot_x.v[j] = 0xffffffffu;
-                
-                uint32_t q_idx = atomicAdd(dp_count, 1);
-                if (q_idx < count) {
-                    Result res; res.kind = 3; res.walker_id = id; res.steps_done = 0;
-                    results[q_idx] = res;
-                }
-                escaping = true;
             }
         }
         if (__any_sync(0xffffffffu, escaping)) {
             warp_affine(s.point, active, &x, &y);
         }
         if (active && !escaping) {
-            ++s.snapshot_steps;
-            if ((s.snapshot_steps & (s.snapshot_steps-1)) == 0) s.snapshot_x = x;
-            uint32_t mask = dp_bits == 32 ? 0xffffffffu : ((1u << dp_bits)-1u);
-            if ((x.v[0] & mask) == 0) {
-                s.snapshot_steps = 0;
+            if (hip_field::equal(x, s.snapshot_x)) {
                 uint32_t q_idx = atomicAdd(dp_count, 1);
                 if (q_idx < count) {
-                    Result res; res.kind = 1; res.x = x; res.a = s.a; res.b = s.b; res.steps_done = steps_done; res.walker_id = id;
+                    Result res; res.kind = 2; res.walker_id = id; res.steps_done = steps_done;
                     results[q_idx] = res;
+                }
+                active = false;
+            } else {
+                ++s.snapshot_steps;
+                if ((s.snapshot_steps & (s.snapshot_steps-1)) == 0) s.snapshot_x = x;
+                uint32_t mask = dp_bits == 32 ? 0xffffffffu : ((1u << dp_bits)-1u);
+                if ((x.v[0] & mask) == 0) {
+                    s.snapshot_steps = 0;
+            uint32_t q_idx = atomicAdd(dp_count, 1);
+            if (q_idx < count) {
+                Result res; res.kind = 1; res.x = x; res.a = s.a; res.b = s.b; res.steps_done = steps_done; res.walker_id = id;
+                results[q_idx] = res;
+            }
                 }
             }
         }
