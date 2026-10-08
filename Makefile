@@ -30,7 +30,7 @@ all: gpu_arch
 
 arch: src/arch.cpp
 ifeq ($(HIP_PLATFORM),nvidia)
-	$(HIPCC) -DIS_NVIDIA src/arch.cpp -o arch
+	$(HIPCC) -DIS_NVIDIA -L/usr/local/cuda/lib64/stubs src/arch.cpp -o arch
 else
 	$(HIPCC) src/arch.cpp -o arch
 endif
