@@ -45,8 +45,13 @@ recurse: $(TARGET)
 -include gpu_arch_file
 
 ifneq ($(filter-out 0,$(strip $(GPU_ARCH))),)
+ifeq ($(HIP_PLATFORM),nvidia)
+    HIPFLAGS += -arch=$(strip $(GPU_ARCH))
+else
     HIPFLAGS += --offload-arch=$(strip $(GPU_ARCH))
 endif
+endif
+
 
 src/hip_bridge_gpu.o: src/hip_bridge.hip include/hip_bridge.h include/hip_field.h
 	$(HIPCC) -x $(HIP_SOURCE_LANGUAGE) \
@@ -58,6 +63,7 @@ src/hip_bridge_gpu.o: src/hip_bridge.hip include/hip_bridge.h include/hip_field.
 
 $(TARGET): $(OBJ)
 	$(LINKER) $(OBJ) $(LINKFLAGS) -o $@ $(LDLIBS)
+
 
 -include $(SRC_CPP:.cpp=.d)
 
