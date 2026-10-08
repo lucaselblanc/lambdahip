@@ -1195,7 +1195,9 @@ uint256_t lambda(std::string target_pubkey_hex, int key_range, int WALKERS, int 
                 uint64_t ops_per_sec = (current_iters - last_iters_print) * 1000 / duration_ms;
                 last_iters_print = current_iters;
 
-                std::cout << CYAN << "\033[3A\r" << "\033[2KOps/s: " << RESET << GREEN << ops_per_sec << RESET << "\n" << CYAN << "\033[2KSelf-Collision Cycles: " << RESET << GREEN << total_cycles.load() << RESET << "\n" << CYAN << "\033[2KCollision Probability: " << RESET << GREEN << std::fixed << std::setprecision(8) << (prob) << "...%" << RESET << CYAN << " | Snapoints: " << RESET << PINK << snapointStatus << RESET << "\n" << std::flush;
+                if (current_iters > 0) {
+                    std::cout << CYAN << "\033[3A\r" << "\033[2KOps/s: " << RESET << GREEN << ops_per_sec << RESET << "\n" << CYAN << "\033[2KSelf-Collision Cycles: " << RESET << GREEN << total_cycles.load() << RESET << "\n" << CYAN << "\033[2KCollision Probability: " << RESET << GREEN << std::fixed << std::setprecision(8) << (prob) << "...%" << RESET << CYAN << " | Snapoints: " << RESET << PINK << snapointStatus << RESET << "\n" << std::flush;
+                }
                 last_print = now;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
