@@ -1159,6 +1159,10 @@ uint256_t lambda(std::string target_pubkey_hex, int key_range, int WALKERS, int 
                         }
                         continue;
                     }
+                    if (event.kind == 3) {
+                        total_cycles.fetch_add(1, std::memory_order_relaxed);
+                        continue;
+                    }
                     hip_field::to64(w->a.limbs, event.a);
                     hip_field::to64(w->b.limbs, event.b);
                     uint64_t x[4];
