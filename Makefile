@@ -52,7 +52,6 @@ else
 endif
 endif
 
-
 src/hip_bridge_gpu.o: src/hip_bridge.hip include/hip_bridge.h include/hip_field.h
 	$(HIPCC) -x $(HIP_SOURCE_LANGUAGE) \
 	$(HIPFLAGS) \
@@ -63,7 +62,6 @@ src/hip_bridge_gpu.o: src/hip_bridge.hip include/hip_bridge.h include/hip_field.
 
 $(TARGET): $(OBJ)
 	$(LINKER) $(OBJ) $(LINKFLAGS) -o $@ $(LDLIBS)
-
 
 -include $(SRC_CPP:.cpp=.d)
 
