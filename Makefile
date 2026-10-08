@@ -30,7 +30,8 @@ all: gpu_arch
 
 arch: src/arch.cpp
 ifeq ($(HIP_PLATFORM),nvidia)
-	$(HIPCC) -DIS_NVIDIA -L/usr/local/cuda/lib64/stubs src/arch.cpp -o arch
+	$(HIPCC) -DIS_NVIDIA -c src/arch.cpp -o arch.o
+	$(CXX) arch.o -L/usr/local/cuda/lib64 -lcudart -o arch
 else
 	$(HIPCC) src/arch.cpp -o arch
 endif
@@ -47,7 +48,6 @@ ifneq ($(filter-out 0,$(strip $(GPU_ARCH))),)
     HIPFLAGS += --offload-arch=$(strip $(GPU_ARCH))
 endif
 
-
 src/hip_bridge_gpu.o: src/hip_bridge.hip include/hip_bridge.h include/hip_field.h
 	$(HIPCC) -x $(HIP_SOURCE_LANGUAGE) \
 	$(HIPFLAGS) \
@@ -59,10 +59,9 @@ src/hip_bridge_gpu.o: src/hip_bridge.hip include/hip_bridge.h include/hip_field.
 $(TARGET): $(OBJ)
 	$(LINKER) $(OBJ) $(LINKFLAGS) -o $@ $(LDLIBS)
 
-
 -include $(SRC_CPP:.cpp=.d)
 
 clean:
 	@echo "Cleaning..."
-	rm -f lambda-hip arch gpu_arch_file
+	rm -f lambda-hip arch arch.o gpu_arch_file
 	find . -type f \( -name "*.o" -o -name "*.d" \) -delete
