@@ -1139,7 +1139,7 @@ uint256_t lambda(std::string target_pubkey_hex, int key_range, int WALKERS, int 
                     continue;
                 }
 
-                constexpr int BATCH_STEPS = 32768;
+                constexpr int BATCH_STEPS = 128;
                 if (!hip_walk::advance(gpu_context, BATCH_STEPS, DP_BITS, events)) {
                     throw std::runtime_error(hip_walk::last_error());
                 }
