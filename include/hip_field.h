@@ -1041,6 +1041,30 @@ namespace hip_field {
         return mul(sqr_n(mul(sqr_n(x223, 23), x22), 10), x45);
     }
 
+    LAMBDA_HD Point affine_add_fast(Point p, Point q) {
+        if (p.infinity) return q;
+        if (q.infinity) return p;
+        U256 h = sub(q.x, p.x);
+        U256 r = sub(q.y, p.y);
+        if (zero(h)) {
+            if (!zero(r)) { Point inf{}; inf.infinity = 1; return inf; }
+            U256 a = sqr(p.x), b = sqr(p.y), c = sqr(b);
+            U256 xb = mul(p.x, b);
+            U256 d = add(add(xb, xb), add(xb, xb));
+            U256 e = add(add(a, a), a);
+            U256 x = sub(sqr(e), add(d, d));
+            U256 c2 = add(c, c), c4 = add(c2, c2);
+            U256 y = sub(mul(e, sub(d, x)), add(c4, c4));
+            Point out{x, y, add(p.y, p.y), 0};
+            return out;
+        }
+        U256 i = sqr(h), j = mul(i, h), v = mul(p.x, i);
+        U256 x = sub(sub(sqr(r), j), add(v, v));
+        U256 y = sub(mul(r, sub(v, x)), mul(p.y, j));
+        Point out{x, y, h, 0};
+        return out;
+    }
+
     LAMBDA_HD Point mixed_add(Point p, Point q) {
         if (p.infinity) return q;
         if (q.infinity) return p;
