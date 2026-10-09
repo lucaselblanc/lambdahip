@@ -730,7 +730,7 @@ uint256_t lambda(std::string target_pubkey_hex, int key_range, int WALKERS, int 
     pointAddJacobian(&target_affine_jac, &target_affine_jac, &shift_jac);
     initPreCompH(&target_affine_jac, windowSize);
 
-    const uint32_t N_STEPS = 256;
+    const uint32_t N_STEPS = 2048;
     struct StepLocal { ECPointJacobian point; uint256_t a; uint256_t b; };
     std::vector<StepLocal> localStepTable(N_STEPS);
     std::mt19937_64 salt(target_affine.x[0]);
