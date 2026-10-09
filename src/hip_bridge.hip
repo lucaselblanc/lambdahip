@@ -40,7 +40,8 @@ __device__ __forceinline__ U256 shuffle_from(U256 x, int lane) {
     for (int i = 0; i < 8; ++i) y.v[i] = __shfl_sync(0xffffffffu, x.v[i], lane);
     return y;
 }
-__device__ __forceinline__ void block_affine(Point p, bool active, U256* x, U256* y, U256* s_pref, U256* s_suff, U256* s_inv) {
+__device__ __forceinline__ void block_affine(Point* p_ptr, bool active, U256* x, U256* y, U256* s_pref, U256* s_suff, U256* s_inv) {
+    Point p = *p_ptr;
     unsigned lane = threadIdx.x & 31u;
     unsigned warp_id = threadIdx.x >> 5;
     
@@ -58,23 +59,28 @@ __device__ __forceinline__ void block_affine(Point p, bool active, U256* x, U256
     __syncthreads();
     
     unsigned num_warps = blockDim.x >> 5;
-    if (threadIdx.x == 0) {
-        U256 pref[32];
-        U256 suff[32];
-        pref[0] = s_pref[0];
-        for (unsigned i = 1; i < num_warps; ++i) {
-            pref[i] = hip_field::mul(pref[i-1], s_pref[i]);
-        }
-        suff[num_warps - 1] = s_pref[num_warps - 1];
-        for (int i = int(num_warps) - 2; i >= 0; --i) {
-            suff[i] = hip_field::mul(suff[i+1], s_pref[i]);
+    if (warp_id == 0) {
+        U256 w_total = lane < num_warps ? s_pref[lane] : hip_field::mont_one();
+        U256 w_pref = w_total, w_suff = w_total;
+        
+        for (int offset = 1; offset < 32; offset <<= 1) {
+            U256 left = shuffle_up(w_pref, offset);
+            if (lane >= unsigned(offset)) w_pref = hip_field::mul(w_pref, left);
+            U256 right = shuffle_down(w_suff, offset);
+            if (lane + unsigned(offset) < 32u) w_suff = hip_field::mul(w_suff, right);
         }
         
-        *s_inv = hip_field::inverse(pref[num_warps - 1]);
+        U256 block_tot = shuffle_from(w_pref, num_warps - 1);
+        if (lane == 0) *s_inv = hip_field::inverse(block_tot);
         
-        for (unsigned i = 0; i < num_warps; ++i) {
-            s_pref[i] = i == 0 ? hip_field::mont_one() : pref[i-1];
-            s_suff[i] = i == num_warps - 1 ? hip_field::mont_one() : suff[i+1];
+        U256 left = shuffle_up(w_pref, 1);
+        U256 right = shuffle_down(w_suff, 1);
+        if (lane == 0) left = hip_field::mont_one();
+        if (lane == num_warps - 1 || lane == 31) right = hip_field::mont_one();
+        
+        if (lane < num_warps) {
+            s_pref[lane] = left;
+            s_suff[lane] = right;
         }
     }
     __syncthreads();
@@ -92,8 +98,19 @@ __device__ __forceinline__ void block_affine(Point p, bool active, U256* x, U256
     
     U256 iz = hip_field::mul(hip_field::mul(left, right), inverse_total);
     U256 iz2 = hip_field::sqr(iz);
-    *x = active && !p.infinity ? hip_field::from_mont(hip_field::mul(p.x, iz2)) : U256{};
-    *y = active && !p.infinity ? hip_field::from_mont(hip_field::mul(p.y, hip_field::mul(iz2, iz))) : U256{};
+    
+    if (active && !p.infinity) {
+        U256 mx = hip_field::mul(p.x, iz2);
+        U256 my = hip_field::mul(p.y, hip_field::mul(iz2, iz));
+        *x = hip_field::from_mont(mx);
+        *y = hip_field::from_mont(my);
+        p_ptr->x = mx;
+        p_ptr->y = my;
+        p_ptr->z = hip_field::mont_one();
+    } else {
+        *x = U256{};
+        *y = U256{};
+    }
 }
 #endif
 __global__ void walk_kernel(State* states, const StepsSoA* steps, Result* results, uint32_t count, int iterations, int dp_bits, uint32_t* dp_count) {
@@ -110,7 +127,7 @@ __global__ void walk_kernel(State* states, const StepsSoA* steps, Result* result
     __shared__ bool block_active;
     __shared__ bool block_escaping;
 
-    block_affine(s.point, active, &x, &y, s_pref, s_suff, &s_inv);
+    block_affine(&s.point, active, &x, &y, s_pref, s_suff, &s_inv);
     for (int iteration = 0; iteration < iterations; ++iteration) {
         if (threadIdx.x == 0) block_active = false;
         __syncthreads();
@@ -129,13 +146,13 @@ __global__ void walk_kernel(State* states, const StepsSoA* steps, Result* result
             q.infinity = steps->inf[index];
             U256 step_a = steps->a[index];
             if (invert) q.y = hip_field::neg(q.y);
-            s.point = hip_field::mixed_add(s.point, q);
+            s.point = hip_field::affine_add_fast(s.point, q);
             s.a = invert ? hip_field::scalar_sub(s.a, step_a)
                          : hip_field::scalar_add(s.a, step_a);
             s.last_jump = jump;
         ++steps_done;
         }
-        block_affine(s.point, active, &x, &y, s_pref, s_suff, &s_inv);
+        block_affine(&s.point, active, &x, &y, s_pref, s_suff, &s_inv);
         bool escaping = false;
         if (active) {
             uint32_t next = step_index(x) | ((y.v[0] & 1u) ? 0u : 0x80000000u);
@@ -161,7 +178,7 @@ __global__ void walk_kernel(State* states, const StepsSoA* steps, Result* result
         __syncthreads();
         
         if (block_escaping) {
-            block_affine(s.point, active, &x, &y, s_pref, s_suff, &s_inv);
+            block_affine(&s.point, active, &x, &y, s_pref, s_suff, &s_inv);
         }
         if (active && !escaping) {
             if (hip_field::equal(x, s.snapshot_x)) {
@@ -267,14 +284,14 @@ bool available() {
 }
 Context* create(const std::vector<State>& states, const std::vector<Step>& steps) {
     if (!available()) return nullptr;
-    if (states.empty() || states.size() > 0xffffffffu || steps.size() != 256) {
-        error_text = "GPU requires at least one walker and exactly 256 steps";
+    if (states.empty() || states.size() > 0xffffffffu || steps.size() != 2048) {
+        error_text = "GPU requires at least one walker and exactly 2048 steps";
         return nullptr;
     }
     Context* ctx = new Context;
     ctx->count = uint32_t(states.size());
     StepsSoA soa;
-    for(size_t i=0; i<256; ++i) {
+    for(size_t i=0; i<2048; ++i) {
         soa.x[i] = steps[i].point.x;
         soa.y[i] = steps[i].point.y;
         soa.z[i] = steps[i].point.z;
