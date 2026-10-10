@@ -118,18 +118,6 @@ __global__ void walk_kernel(State* states, const StepsSoA* steps, Result* result
     uint32_t total_threads = (count + 3) / 4;
     if (tid >= total_threads) return;
 
-    struct SharedSteps {
-        U256 x[512];
-        U256 y[512];
-    };
-    __shared__ SharedSteps shared_steps;
-    
-    for (int i = threadIdx.x; i < 512; i += blockDim.x) {
-        shared_steps.x[i] = steps->x[i];
-        shared_steps.y[i] = steps->y[i];
-    }
-    __syncthreads();
-
     U256 x[4], y[4], a[4], snap_x[4];
     uint64_t snap_steps[4];
     uint32_t last_jump[4];
@@ -163,8 +151,8 @@ __global__ void walk_kernel(State* states, const StepsSoA* steps, Result* result
                 uint32_t index = step_index(x[k]);
                 bool invert = (y[k].v[0] & 1u) != 0;
                 jump[k] = index | (invert ? 0x80000000u : 0u);
-                jmp_x[k] = shared_steps.x[index];
-                jmp_y[k] = shared_steps.y[index];
+                jmp_x[k] = steps->x[index];
+                jmp_y[k] = steps->y[index];
                 step_a[k] = steps->a[index];
                 if (invert) jmp_y[k] = hip_field::neg(jmp_y[k]);
                 
@@ -199,11 +187,11 @@ __global__ void walk_kernel(State* states, const StepsSoA* steps, Result* result
                 uint32_t next = step_index(x[k]) | ((y[k].v[0] & 1u) ? 0u : 0x80000000u);
                 if (jump[k] == next) {
                     uint32_t gid = tid + k * total_threads;
-                    uint32_t escape = uint32_t(avalanche(word64(x[k],0) ^ 0xDEADBEEFULL)) & 511u;
+                    uint32_t escape = uint32_t(avalanche(word64(x[k],0) ^ 0xDEADBEEFULL)) & 2047u;
                     
                     Point eq;
-                    eq.x = shared_steps.x[escape];
-                    eq.y = shared_steps.y[escape];
+                    eq.x = steps->x[escape];
+                    eq.y = steps->y[escape];
                     eq.z = hip_field::mont_one();
                     eq.infinity = 0;
                     
@@ -281,8 +269,8 @@ bool available() {
 }
 Context* create(const std::vector<State>& states, const std::vector<Step>& steps) {
     if (!available()) return nullptr;
-    if (states.empty() || states.size() > 0xffffffffu || steps.size() != 512) {
-        error_text = "GPU requires at least one walker and exactly 512 steps";
+    if (states.empty() || states.size() > 0xffffffffu || steps.size() != 2048) {
+        error_text = "GPU requires at least one walker and exactly 2048 steps";
         return nullptr;
     }
     Context* ctx = new Context;
