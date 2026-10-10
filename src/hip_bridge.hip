@@ -115,96 +115,6 @@ __device__ __forceinline__ void block_affine(Point* p_ptr, bool active, U256* x,
 #endif
 __global__ void walk_kernel(State* states, const StepsSoA* steps, Result* results, uint32_t count, int iterations, int dp_bits, uint32_t* dp_count) {
     uint32_t id = blockIdx.x * blockDim.x + threadIdx.x;
-#if defined(__CUDA_ARCH__)
-    bool active = id < count;
-    State s{};
-    if (active) s = states[id];
-    uint32_t steps_done = 0;
-    U256 x{}, y{};
-    __shared__ U256 s_pref[32];
-    __shared__ U256 s_suff[32];
-    __shared__ U256 s_inv;
-    __shared__ bool block_active;
-    __shared__ bool block_escaping;
-
-    block_affine(&s.point, active, &x, &y, s_pref, s_suff, &s_inv);
-    for (int iteration = 0; iteration < iterations; ++iteration) {
-        if (threadIdx.x == 0) block_active = false;
-        __syncthreads();
-        if (active) block_active = true;
-        __syncthreads();
-        if (!block_active) break;
-        uint32_t jump = 0;
-        if (active) {
-            uint32_t index = step_index(x);
-            bool invert = (y.v[0] & 1u) != 0;
-            jump = index | (invert ? 0x80000000u : 0u);
-            Point q;
-            q.x = steps->x[index];
-            q.y = steps->y[index];
-            q.z = steps->z[index];
-            q.infinity = steps->inf[index];
-            U256 step_a = steps->a[index];
-            if (invert) q.y = hip_field::neg(q.y);
-            s.point = hip_field::affine_add_fast(s.point, q);
-            s.a = invert ? hip_field::scalar_sub(s.a, step_a)
-                         : hip_field::scalar_add(s.a, step_a);
-            s.last_jump = jump;
-        ++steps_done;
-        }
-        block_affine(&s.point, active, &x, &y, s_pref, s_suff, &s_inv);
-        bool escaping = false;
-        if (active) {
-            uint32_t next = step_index(x) | ((y.v[0] & 1u) ? 0u : 0x80000000u);
-            if (jump == next) {
-                uint32_t escape = uint32_t(avalanche(word64(x,0) ^ 0xDEADBEEFULL)) & 511u;
-                Point eq;
-                eq.x = steps->x[escape];
-                eq.y = steps->y[escape];
-                eq.z = steps->z[escape];
-                eq.infinity = steps->inf[escape];
-                s.point = hip_field::mixed_add(s.point, eq);
-                s.a = hip_field::scalar_add(s.a, steps->a[escape]);
-                s.last_jump = 0xffffffffu;
-                s.snapshot_steps = 0;
-                for (int j = 0; j < 8; ++j) s.snapshot_x.v[j] = 0xffffffffu;
-                escaping = true;
-            }
-        }
-        
-        if (threadIdx.x == 0) block_escaping = false;
-        __syncthreads();
-        if (escaping) block_escaping = true;
-        __syncthreads();
-        
-        if (block_escaping) {
-            block_affine(&s.point, active, &x, &y, s_pref, s_suff, &s_inv);
-        }
-        if (active && !escaping) {
-            if (hip_field::equal(x, s.snapshot_x)) {
-                uint32_t q_idx = atomicAdd(dp_count, 1);
-                if (q_idx < count) {
-                    Result res; res.kind = 2; res.walker_id = id; res.steps_done = steps_done;
-                    results[q_idx] = res;
-                }
-                active = false;
-            } else {
-                ++s.snapshot_steps;
-                if ((s.snapshot_steps & (s.snapshot_steps-1)) == 0) s.snapshot_x = x;
-                uint32_t mask = dp_bits == 32 ? 0xffffffffu : ((1u << dp_bits)-1u);
-                if ((x.v[0] & mask) == 0) {
-                    s.snapshot_steps = 0;
-            uint32_t q_idx = atomicAdd(dp_count, 1);
-            if (q_idx < count) {
-                Result res; res.kind = 1; res.x = x; res.a = s.a; res.b = s.b; res.steps_done = steps_done; res.walker_id = id;
-                results[q_idx] = res;
-            }
-                }
-            }
-        }
-    }
-    if (id < count) states[id] = s;
-#else
     if (id >= count) return;
     
     struct SharedSteps {
@@ -345,7 +255,6 @@ __global__ void walk_kernel(State* states, const StepsSoA* steps, Result* result
     s.point.z = hip_field::mont_one();
     s.point.infinity = 0;
     states[id] = s;
-#endif
 }
 }
 
