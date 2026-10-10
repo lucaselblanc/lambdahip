@@ -187,7 +187,7 @@ __global__ void walk_kernel(State* states, const StepsSoA* steps, Result* result
                     Result res; res.kind = 2; res.walker_id = id; res.steps_done = steps_done;
                     results[q_idx] = res;
                 }
-                active = false;
+                break;
             } else {
                 ++s.snapshot_steps;
                 if ((s.snapshot_steps & (s.snapshot_steps-1)) == 0) s.snapshot_x = x;
