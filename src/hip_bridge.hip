@@ -120,7 +120,6 @@ __global__ void walk_kernel(State* states, const StepsSoA* steps, Result* result
     struct SharedSteps {
         U256 x[512];
         U256 y[512];
-        U256 a[512];
     };
     __shared__ SharedSteps shared_steps;
     
@@ -128,7 +127,6 @@ __global__ void walk_kernel(State* states, const StepsSoA* steps, Result* result
     for (int i = threadIdx.x; i < 512; i += blockDim.x) {
         shared_steps.x[i] = steps->x[i];
         shared_steps.y[i] = steps->y[i];
-        shared_steps.a[i] = steps->a[i];
     }
     __syncthreads();
 
@@ -159,7 +157,7 @@ __global__ void walk_kernel(State* states, const StepsSoA* steps, Result* result
             jump = index | (invert ? 0x80000000u : 0u);
             jmp_x = shared_steps.x[index];
             jmp_y = shared_steps.y[index];
-            step_a = shared_steps.a[index];
+            step_a = steps->a[index];
             if (invert) jmp_y = hip_field::neg(jmp_y);
         }
 
@@ -216,7 +214,7 @@ __global__ void walk_kernel(State* states, const StepsSoA* steps, Result* result
                 eq.z = hip_field::mont_one();
                 eq.infinity = 0;
                 s.point = hip_field::mixed_add(s.point, eq);
-                s.a = hip_field::scalar_add(s.a, shared_steps.a[escape]);
+                s.a = hip_field::scalar_add(s.a, steps->a[escape]);
                 s.last_jump = 0xffffffffu;
                 s.snapshot_steps = 0;
                 for (int j = 0; j < 8; ++j) s.snapshot_x.v[j] = 0xffffffffu;
