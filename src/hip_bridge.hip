@@ -40,11 +40,11 @@ __device__ __forceinline__ U256 shuffle_from(U256 x, int lane) {
     for (int i = 0; i < 8; ++i) y.v[i] = __shfl_sync(0xffffffffu, x.v[i], lane);
     return y;
 }
-__device__ __forceinline__ void block_affine(Point* p_ptr, bool active, U256* x, U256* y, U256* s_pref, U256* s_suff, U256* s_inv) {
-    Point p = *p_ptr;
+__device__ __forceinline__ void warp_affine(Point p, bool active, U256* x, U256* y) {
+    if (__all_sync(0xffffffffu, !active)) {
+        *x = U256{}; *y = U256{}; return;
+    }
     unsigned lane = threadIdx.x & 31u;
-    unsigned warp_id = threadIdx.x >> 5;
-    
     U256 z = active && !p.infinity ? p.z : hip_field::mont_one();
     U256 prefix = z, suffix = z;
     for (int offset = 1; offset < 32; offset <<= 1) {
@@ -54,60 +54,16 @@ __device__ __forceinline__ void block_affine(Point* p_ptr, bool active, U256* x,
         if (lane + unsigned(offset) < 32u) suffix = hip_field::mul(suffix, right);
     }
     U256 total = shuffle_from(prefix, 31);
-    
-    if (lane == 0) s_pref[warp_id] = total;
-    __syncthreads();
-    
-    unsigned num_warps = blockDim.x >> 5;
-    if (warp_id == 0) {
-        U256 w_total = lane < num_warps ? s_pref[lane] : hip_field::mont_one();
-        U256 w_pref = w_total, w_suff = w_total;
-        
-        for (int offset = 1; offset < 32; offset <<= 1) {
-            U256 left = shuffle_up(w_pref, offset);
-            if (lane >= unsigned(offset)) w_pref = hip_field::mul(w_pref, left);
-            U256 right = shuffle_down(w_suff, offset);
-            if (lane + unsigned(offset) < 32u) w_suff = hip_field::mul(w_suff, right);
-        }
-        
-        U256 block_tot = shuffle_from(w_pref, num_warps - 1);
-        if (lane == 0) *s_inv = hip_field::inverse(block_tot);
-        
-        U256 left = shuffle_up(w_pref, 1);
-        U256 right = shuffle_down(w_suff, 1);
-        if (lane == 0) left = hip_field::mont_one();
-        if (lane == num_warps - 1 || lane == 31) right = hip_field::mont_one();
-        
-        if (lane < num_warps) {
-            s_pref[lane] = left;
-            s_suff[lane] = right;
-        }
-    }
-    __syncthreads();
-    
-    U256 block_inverse = *s_inv;
-    U256 my_warp_prefix = s_pref[warp_id];
-    U256 my_warp_suffix = s_suff[warp_id];
-    
-    U256 inverse_total = hip_field::mul(hip_field::mul(my_warp_prefix, my_warp_suffix), block_inverse);
-    
+    U256 inverse_total = lane == 31 ? hip_field::inverse(total) : hip_field::mont_one();
+    inverse_total = shuffle_from(inverse_total, 31);
     U256 left = shuffle_up(prefix, 1);
     U256 right = shuffle_down(suffix, 1);
     if (lane == 0) left = hip_field::mont_one();
     if (lane == 31) right = hip_field::mont_one();
-    
     U256 iz = hip_field::mul(hip_field::mul(left, right), inverse_total);
     U256 iz2 = hip_field::sqr(iz);
-    
-    if (active && !p.infinity) {
-        U256 mx = hip_field::mul(p.x, iz2);
-        U256 my = hip_field::mul(p.y, hip_field::mul(iz2, iz));
-        *x = hip_field::from_mont(mx);
-        *y = hip_field::from_mont(my);
-    } else {
-        *x = U256{};
-        *y = U256{};
-    }
+    *x = active && !p.infinity ? hip_field::from_mont(hip_field::mul(p.x, iz2)) : U256{};
+    *y = active && !p.infinity ? hip_field::from_mont(hip_field::mul(p.y, hip_field::mul(iz2, iz))) : U256{};
 }
 #endif
 __global__ void walk_kernel(State* states, const StepsSoA* steps, Result* results, uint32_t count, int iterations, int dp_bits, uint32_t* dp_count) {
@@ -118,19 +74,9 @@ __global__ void walk_kernel(State* states, const StepsSoA* steps, Result* result
     if (active) s = states[id];
     uint32_t steps_done = 0;
     U256 x{}, y{};
-    __shared__ U256 s_pref[32];
-    __shared__ U256 s_suff[32];
-    __shared__ U256 s_inv;
-    __shared__ bool block_active;
-    __shared__ bool block_escaping;
-
-    block_affine(&s.point, active, &x, &y, s_pref, s_suff, &s_inv);
+    warp_affine(s.point, active, &x, &y);
     for (int iteration = 0; iteration < iterations; ++iteration) {
-        if (threadIdx.x == 0) block_active = false;
-        __syncthreads();
-        if (active) block_active = true;
-        __syncthreads();
-        if (!block_active) break;
+        if (__all_sync(0xffffffffu, !active)) break;
         uint32_t jump = 0;
         if (active) {
             uint32_t index = step_index(x);
@@ -149,7 +95,7 @@ __global__ void walk_kernel(State* states, const StepsSoA* steps, Result* result
             s.last_jump = jump;
         ++steps_done;
         }
-        block_affine(&s.point, active, &x, &y, s_pref, s_suff, &s_inv);
+        warp_affine(s.point, active, &x, &y);
         bool escaping = false;
         if (active) {
             uint32_t next = step_index(x) | ((y.v[0] & 1u) ? 0u : 0x80000000u);
@@ -168,14 +114,8 @@ __global__ void walk_kernel(State* states, const StepsSoA* steps, Result* result
                 escaping = true;
             }
         }
-        
-        if (threadIdx.x == 0) block_escaping = false;
-        __syncthreads();
-        if (escaping) block_escaping = true;
-        __syncthreads();
-        
-        if (block_escaping) {
-            block_affine(&s.point, active, &x, &y, s_pref, s_suff, &s_inv);
+        if (__any_sync(0xffffffffu, escaping)) {
+            warp_affine(s.point, active, &x, &y);
         }
         if (active && !escaping) {
             if (hip_field::equal(x, s.snapshot_x)) {
@@ -184,7 +124,7 @@ __global__ void walk_kernel(State* states, const StepsSoA* steps, Result* result
                     Result res; res.kind = 2; res.walker_id = id; res.steps_done = steps_done;
                     results[q_idx] = res;
                 }
-                break;
+                active = false;
             } else {
                 ++s.snapshot_steps;
                 if ((s.snapshot_steps & (s.snapshot_steps-1)) == 0) s.snapshot_x = x;
@@ -196,6 +136,7 @@ __global__ void walk_kernel(State* states, const StepsSoA* steps, Result* result
                 Result res; res.kind = 1; res.x = x; res.a = s.a; res.b = s.b; res.steps_done = steps_done; res.walker_id = id;
                 results[q_idx] = res;
             }
+                    active = false;
                 }
             }
         }
@@ -257,6 +198,7 @@ __global__ void walk_kernel(State* states, const StepsSoA* steps, Result* result
                     Result res; res.kind = 1; res.x = x; res.a = s.a; res.b = s.b; res.steps_done = steps_done; res.walker_id = id;
                     results[q_idx] = res;
                 }
+                break;
             }
         }
     }
