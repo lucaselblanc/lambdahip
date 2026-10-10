@@ -18,11 +18,11 @@ struct State {
 struct Step { Point point; U256 a; };
 
 struct StepsSoA {
-    U256 x[2048];
-    U256 y[2048];
-    U256 z[2048];
-    uint32_t inf[2048];
-    U256 a[2048];
+    U256 x[512];
+    U256 y[512];
+    U256 z[512];
+    uint32_t inf[512];
+    U256 a[512];
 };
 struct Result {
     U256 x, a, b;
