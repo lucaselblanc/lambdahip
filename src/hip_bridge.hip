@@ -114,142 +114,157 @@ __device__ __forceinline__ void block_affine(Point* p_ptr, bool active, U256* x,
 }
 #endif
 __global__ void walk_kernel(State* states, const StepsSoA* steps, Result* results, uint32_t count, int iterations, int dp_bits, uint32_t* dp_count) {
-    uint32_t tid = blockIdx.x * blockDim.x + threadIdx.x;
-    uint32_t total_threads = (count + 3) / 4;
-    if (tid >= total_threads) return;
+    uint32_t id = blockIdx.x * blockDim.x + threadIdx.x;
+#if defined(__CUDA_ARCH__)
+    bool active = id < count;
+    State s{};
+    if (active) s = states[id];
+    uint32_t steps_done = 0;
+    U256 x{}, y{};
+    __shared__ U256 s_pref[32];
+    __shared__ U256 s_suff[32];
+    __shared__ U256 s_inv;
+    __shared__ bool block_active;
+    __shared__ bool block_escaping;
 
-    U256 x[4], y[4], a[4], snap_x[4];
-    uint64_t snap_steps[4];
-    uint32_t last_jump[4];
-    bool active[4];
-    uint32_t steps_done[4] = {0, 0, 0, 0};
-
-    for (int k = 0; k < 4; ++k) {
-        uint32_t gid = tid + k * total_threads;
-        active[k] = (gid < count);
-        if (active[k]) {
-            State s = states[gid];
-            hip_field::affine_xy(s.point, &x[k], &y[k]);
-            a[k] = s.a;
-            snap_x[k] = s.snapshot_x;
-            snap_steps[k] = s.snapshot_steps;
-            last_jump[k] = s.last_jump;
-        }
-    }
-
+    block_affine(&s.point, active, &x, &y, s_pref, s_suff, &s_inv);
     for (int iteration = 0; iteration < iterations; ++iteration) {
-        U256 jmp_x[4], jmp_y[4];
-        uint32_t jump[4] = {0};
-        U256 step_a[4];
-        U256 dx[4];
-        
-        bool any_active = false;
-        for (int k = 0; k < 4; ++k) {
-            dx[k] = hip_field::mont_one();
-            if (active[k]) {
-                any_active = true;
-                uint32_t index = step_index(x[k]);
-                bool invert = (y[k].v[0] & 1u) != 0;
-                jump[k] = index | (invert ? 0x80000000u : 0u);
-                jmp_x[k] = steps->x[index];
-                jmp_y[k] = steps->y[index];
-                step_a[k] = steps->a[index];
-                if (invert) jmp_y[k] = hip_field::neg(jmp_y[k]);
-                
-                U256 d = hip_field::sub(jmp_x[k], x[k]);
-                if (!hip_field::zero(d)) dx[k] = d;
+        if (threadIdx.x == 0) block_active = false;
+        __syncthreads();
+        if (active) block_active = true;
+        __syncthreads();
+        if (!block_active) break;
+        uint32_t jump = 0;
+        if (active) {
+            uint32_t index = step_index(x);
+            bool invert = (y.v[0] & 1u) != 0;
+            jump = index | (invert ? 0x80000000u : 0u);
+            Point q;
+            q.x = steps->x[index];
+            q.y = steps->y[index];
+            q.z = steps->z[index];
+            q.infinity = steps->inf[index];
+            U256 step_a = steps->a[index];
+            if (invert) q.y = hip_field::neg(q.y);
+            s.point = hip_field::affine_add_fast(s.point, q);
+            s.a = invert ? hip_field::scalar_sub(s.a, step_a)
+                         : hip_field::scalar_add(s.a, step_a);
+            s.last_jump = jump;
+        ++steps_done;
+        }
+        block_affine(&s.point, active, &x, &y, s_pref, s_suff, &s_inv);
+        bool escaping = false;
+        if (active) {
+            uint32_t next = step_index(x) | ((y.v[0] & 1u) ? 0u : 0x80000000u);
+            if (jump == next) {
+                uint32_t escape = uint32_t(avalanche(word64(x,0) ^ 0xDEADBEEFULL)) & 2047u;
+                Point eq;
+                eq.x = steps->x[escape];
+                eq.y = steps->y[escape];
+                eq.z = steps->z[escape];
+                eq.infinity = steps->inf[escape];
+                s.point = hip_field::mixed_add(s.point, eq);
+                s.a = hip_field::scalar_add(s.a, steps->a[escape]);
+                s.last_jump = 0xffffffffu;
+                s.snapshot_steps = 0;
+                for (int j = 0; j < 8; ++j) s.snapshot_x.v[j] = 0xffffffffu;
+                escaping = true;
             }
         }
         
-        if (!any_active) break;
+        if (threadIdx.x == 0) block_escaping = false;
+        __syncthreads();
+        if (escaping) block_escaping = true;
+        __syncthreads();
         
-        U256 p01 = hip_field::mul(dx[0], dx[1]);
-        U256 p23 = hip_field::mul(dx[2], dx[3]);
-        U256 p0123 = hip_field::mul(p01, p23);
-        U256 inv_all = hip_field::inverse(p0123);
-        U256 inv01 = hip_field::mul(inv_all, p23);
-        U256 inv23 = hip_field::mul(inv_all, p01);
-        
-        U256 inv[4];
-        inv[0] = hip_field::mul(inv01, dx[1]);
-        inv[1] = hip_field::mul(inv01, dx[0]);
-        inv[2] = hip_field::mul(inv23, dx[3]);
-        inv[3] = hip_field::mul(inv23, dx[2]);
-        
-        for (int k = 0; k < 4; ++k) {
-            if (active[k]) {
-                hip_field::affine_add_with_inv(x[k], y[k], jmp_x[k], jmp_y[k], inv[k], &x[k], &y[k]);
-                bool invert = (jump[k] & 0x80000000u) != 0;
-                a[k] = invert ? hip_field::scalar_sub(a[k], step_a[k]) : hip_field::scalar_add(a[k], step_a[k]);
-                last_jump[k] = jump[k];
-                ++steps_done[k];
-
-                uint32_t next = step_index(x[k]) | ((y[k].v[0] & 1u) ? 0u : 0x80000000u);
-                if (jump[k] == next) {
-                    uint32_t gid = tid + k * total_threads;
-                    uint32_t escape = uint32_t(avalanche(word64(x[k],0) ^ 0xDEADBEEFULL)) & 2047u;
-                    
-                    Point eq;
-                    eq.x = steps->x[escape];
-                    eq.y = steps->y[escape];
-                    eq.z = hip_field::mont_one();
-                    eq.infinity = 0;
-                    
-                    Point pt;
-                    pt.x = x[k]; pt.y = y[k]; pt.z = hip_field::mont_one(); pt.infinity = 0;
-                    pt = hip_field::mixed_add(pt, eq);
-                    a[k] = hip_field::scalar_add(a[k], steps->a[escape]);
-                    last_jump[k] = 0xffffffffu;
-                    snap_steps[k] = 0;
-                    for (int j = 0; j < 8; ++j) snap_x[k].v[j] = 0xffffffffu;
-                    
-                    hip_field::affine_xy(pt, &x[k], &y[k]);
+        if (block_escaping) {
+            block_affine(&s.point, active, &x, &y, s_pref, s_suff, &s_inv);
+        }
+        if (active && !escaping) {
+            if (hip_field::equal(x, s.snapshot_x)) {
+                uint32_t q_idx = atomicAdd(dp_count, 1);
+                if (q_idx < count) {
+                    Result res; res.kind = 2; res.walker_id = id; res.steps_done = steps_done;
+                    results[q_idx] = res;
                 }
+                active = false;
+            } else {
+                ++s.snapshot_steps;
+                if ((s.snapshot_steps & (s.snapshot_steps-1)) == 0) s.snapshot_x = x;
+                uint32_t mask = dp_bits == 32 ? 0xffffffffu : ((1u << dp_bits)-1u);
+                if ((x.v[0] & mask) == 0) {
+                    s.snapshot_steps = 0;
+            uint32_t q_idx = atomicAdd(dp_count, 1);
+            if (q_idx < count) {
+                Result res; res.kind = 1; res.x = x; res.a = s.a; res.b = s.b; res.steps_done = steps_done; res.walker_id = id;
+                results[q_idx] = res;
             }
-        }
-        
-        for (int k = 0; k < 4; ++k) {
-            if (active[k]) {
-                if (hip_field::equal(x[k], snap_x[k])) {
-                    uint32_t q_idx = atomicAdd(dp_count, 1);
-                    if (q_idx < count) {
-                        Result res; res.kind = 2; res.walker_id = tid + k * total_threads; res.steps_done = steps_done[k];
-                        results[q_idx] = res;
-                    }
-                    active[k] = false;
-                } else {
-                    ++snap_steps[k];
-                    if ((snap_steps[k] & (snap_steps[k]-1)) == 0) snap_x[k] = x[k];
-                    uint32_t mask = dp_bits == 32 ? 0xffffffffu : ((1u << dp_bits)-1u);
-                    if ((x[k].v[0] & mask) == 0) {
-                        snap_steps[k] = 0;
-                        uint32_t q_idx = atomicAdd(dp_count, 1);
-                        if (q_idx < count) {
-                            uint32_t gid = tid + k * total_threads;
-                            Result res; res.kind = 1; res.x = x[k]; res.a = a[k]; res.b = states[gid].b; res.steps_done = steps_done[k]; res.walker_id = gid;
-                            results[q_idx] = res;
-                        }
-                    }
                 }
             }
         }
     }
+    if (id < count) states[id] = s;
+#else
+    if (id >= count) return;
+    State s = states[id];
+    uint32_t steps_done = 0;
+    U256 x, y;
+    hip_field::affine_xy(s.point, &x, &y);
+    for (int iteration = 0; iteration < iterations; ++iteration) {
+        uint32_t index = step_index(x);
+        bool invert = (y.v[0] & 1u) != 0;
+        uint32_t jump = index | (invert ? 0x80000000u : 0u);
+        Point q;
+        q.x = steps->x[index];
+        q.y = steps->y[index];
+        q.z = steps->z[index];
+        q.infinity = steps->inf[index];
+        U256 step_a = steps->a[index];
+        if (invert) q.y = hip_field::neg(q.y);
+        s.point = hip_field::mixed_add(s.point, q);
+        s.a = invert ? hip_field::scalar_sub(s.a, step_a) : hip_field::scalar_add(s.a, step_a);
+        s.last_jump = jump;
+        ++steps_done;
+        hip_field::affine_xy(s.point, &x, &y);
 
-    for (int k = 0; k < 4; ++k) {
-        uint32_t gid = tid + k * total_threads;
-        if (gid < count) {
-            State s = states[gid];
-            s.point.x = x[k];
-            s.point.y = y[k];
-            s.point.z = hip_field::mont_one();
-            s.point.infinity = 0;
-            s.a = a[k];
-            s.snapshot_x = snap_x[k];
-            s.snapshot_steps = snap_steps[k];
-            s.last_jump = last_jump[k];
-            states[gid] = s;
+        uint32_t next = step_index(x) | ((y.v[0] & 1u) ? 0u : 0x80000000u);
+        if (jump == next) {
+            uint32_t escape = uint32_t(avalanche(word64(x,0) ^ 0xDEADBEEFULL)) & 255u;
+            Point eq;
+            eq.x = steps->x[escape];
+            eq.y = steps->y[escape];
+            eq.z = steps->z[escape];
+            eq.infinity = steps->inf[escape];
+            s.point = hip_field::mixed_add(s.point, eq);
+            s.a = hip_field::scalar_add(s.a, steps->a[escape]);
+            s.last_jump = 0xffffffffu;
+            s.snapshot_steps = 0;
+            for (int j = 0; j < 8; ++j) s.snapshot_x.v[j] = 0xffffffffu;
+            hip_field::affine_xy(s.point, &x, &y);
+            continue;
+        } else if (hip_field::equal(x, s.snapshot_x)) {
+            uint32_t q_idx = atomicAdd(dp_count, 1);
+            if (q_idx < count) {
+                Result res; res.kind = 2; res.walker_id = id; res.steps_done = steps_done;
+                results[q_idx] = res;
+            }
+            break;
+        } else {
+            ++s.snapshot_steps;
+            if ((s.snapshot_steps & (s.snapshot_steps-1)) == 0) s.snapshot_x = x;
+            uint32_t mask = dp_bits == 32 ? 0xffffffffu : ((1u << dp_bits)-1u);
+            if ((x.v[0] & mask) == 0) {
+                s.snapshot_steps = 0;
+                uint32_t q_idx = atomicAdd(dp_count, 1);
+                if (q_idx < count) {
+                    Result res; res.kind = 1; res.x = x; res.a = s.a; res.b = s.b; res.steps_done = steps_done; res.walker_id = id;
+                    results[q_idx] = res;
+                }
+            }
         }
     }
+    states[id] = s;
+#endif
 }
 }
 
@@ -276,7 +291,7 @@ Context* create(const std::vector<State>& states, const std::vector<Step>& steps
     Context* ctx = new Context;
     ctx->count = uint32_t(states.size());
     StepsSoA soa;
-    for(size_t i=0; i<512; ++i) {
+    for(size_t i=0; i<2048; ++i) {
         soa.x[i] = steps[i].point.x;
         soa.y[i] = steps[i].point.y;
         soa.z[i] = steps[i].point.z;
@@ -302,8 +317,7 @@ bool advance(Context* ctx, int iterations, int dp_bits, std::vector<Result>& res
     uint32_t zero = 0;
     if (!check(hipMemcpy(ctx->device_dp_count, &zero, sizeof(uint32_t), hipMemcpyHostToDevice), "copy zero")) return false;
     constexpr int block = 128;
-    uint32_t total_threads = (ctx->count + 3) / 4;
-    hipLaunchKernelGGL(walk_kernel, dim3((total_threads+block-1)/block), dim3(block), 0, 0,ctx->device_states, ctx->device_steps, ctx->device_results, ctx->count, iterations, dp_bits, ctx->device_dp_count);
+    hipLaunchKernelGGL(walk_kernel, dim3((ctx->count+block-1)/block), dim3(block), 0, 0,ctx->device_states, ctx->device_steps, ctx->device_results, ctx->count, iterations, dp_bits, ctx->device_dp_count);
     if (!check(hipGetLastError(), "walk kernel launch")) return false;
     uint32_t total_dps = 0;
     if (!check(hipMemcpy(&total_dps, ctx->device_dp_count, sizeof(uint32_t), hipMemcpyDeviceToHost), "copy count")) return false;
