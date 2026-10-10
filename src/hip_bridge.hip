@@ -229,7 +229,7 @@ __global__ void walk_kernel(State* states, const StepsSoA* steps, Result* result
 
         uint32_t next = step_index(x) | ((y.v[0] & 1u) ? 0u : 0x80000000u);
         if (jump == next) {
-            uint32_t escape = uint32_t(avalanche(word64(x,0) ^ 0xDEADBEEFULL)) & 255u;
+            uint32_t escape = uint32_t(avalanche(word64(x,0) ^ 0xDEADBEEFULL)) & 2047u;
             Point eq;
             eq.x = steps->x[escape];
             eq.y = steps->y[escape];
