@@ -1099,5 +1099,20 @@ namespace hip_field {
         *x = from_mont(mul(p.x, iz2));
         *y = from_mont(mul(p.y, mul(iz2, iz)));
     }
+
+    LAMBDA_HD void affine_add_with_inv(
+        U256 x1, U256 y1, 
+        U256 x2, U256 y2, 
+        U256 inv_dx,         
+        U256 *out_x, U256 *out_y)
+    {
+        U256 dy = sub(y2, y1);
+        U256 slope = mul(dy, inv_dx);
+        U256 slope2 = sqr(slope);
+        U256 x3 = sub(sub(slope2, x1), x2);
+        U256 y3 = sub(mul(slope, sub(x1, x3)), y1);
+        *out_x = x3;
+        *out_y = y3;
+    }
 }
 #endif
