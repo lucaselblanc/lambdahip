@@ -104,9 +104,6 @@ __device__ __forceinline__ void block_affine(Point* p_ptr, bool active, U256* x,
         U256 my = hip_field::mul(p.y, hip_field::mul(iz2, iz));
         *x = hip_field::from_mont(mx);
         *y = hip_field::from_mont(my);
-        p_ptr->x = mx;
-        p_ptr->y = my;
-        p_ptr->z = hip_field::mont_one();
     } else {
         *x = U256{};
         *y = U256{};
