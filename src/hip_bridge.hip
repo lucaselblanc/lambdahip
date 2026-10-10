@@ -24,17 +24,6 @@ __device__ __forceinline__ uint32_t step_index(U256 x) {
                         (word64(x,2)<<2) ^ (word64(x,3)<<3);
     return uint32_t(avalanche(combined)) & 2047u;
 }
-__device__ __forceinline__ void affine_xy_mont(Point p, U256 *x, U256 *y) {
-    if (p.infinity) { *x = U256{}; *y = U256{}; return; }
-    if (hip_field::equal(p.z, hip_field::mont_one())) {
-        *x = p.x; *y = p.y;
-    } else {
-        U256 iz = hip_field::inverse(p.z);
-        U256 iz2 = hip_field::sqr(iz);
-        *x = hip_field::mul(p.x, iz2);
-        *y = hip_field::mul(p.y, hip_field::mul(iz2, iz));
-    }
-}
 #if defined(__CUDA_ARCH__)
 __device__ __forceinline__ U256 shuffle_up(U256 x, int offset) {
     U256 y;
@@ -140,7 +129,7 @@ __global__ void walk_kernel(State* states, const StepsSoA* steps, Result* result
         active[k] = (gid < count);
         if (active[k]) {
             State s = states[gid];
-            affine_xy_mont(s.point, &x[k], &y[k]);
+            hip_field::affine_xy(s.point, &x[k], &y[k]);
             a[k] = s.a;
             snap_x[k] = s.snapshot_x;
             snap_steps[k] = s.snapshot_steps;
@@ -214,7 +203,7 @@ __global__ void walk_kernel(State* states, const StepsSoA* steps, Result* result
                     snap_steps[k] = 0;
                     for (int j = 0; j < 8; ++j) snap_x[k].v[j] = 0xffffffffu;
                     
-                    affine_xy_mont(pt, &x[k], &y[k]);
+                    hip_field::affine_xy(pt, &x[k], &y[k]);
                 }
             }
         }
