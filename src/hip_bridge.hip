@@ -143,7 +143,7 @@ __global__ void walk_kernel(State* states, const StepsSoA* steps, Result* result
             q.infinity = steps->inf[index];
             U256 step_a = steps->a[index];
             if (invert) q.y = hip_field::neg(q.y);
-            s.point = hip_field::affine_add_fast(s.point, q);
+            s.point = hip_field::mixed_add(s.point, q);
             s.a = invert ? hip_field::scalar_sub(s.a, step_a)
                          : hip_field::scalar_add(s.a, step_a);
             s.last_jump = jump;
