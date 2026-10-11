@@ -937,13 +937,9 @@ namespace hip_field {
               "r"(prime.v[0]), "r"(prime.v[1]), "r"(prime.v[2]), "r"(prime.v[3]),
               "r"(prime.v[4]), "r"(prime.v[5]), "r"(prime.v[6]), "r"(prime.v[7])
         );
-        if (t16) {
-            r_out = raw_add(r_out, mont_one());
-        } else {
-            uint32_t carry;
-            U256 sub_r = raw_sub(r_out, prime, &carry);
-            if (carry == 0) r_out = sub_r;
-        }
+        uint32_t borrow;
+        U256 sub_r = raw_sub(r_out, prime, &borrow);
+        if (t16 || borrow == 0) r_out = sub_r;
     #elif defined(__HIP_DEVICE_COMPILE__)
         uint32_t t[17] = {};
         #pragma unroll
@@ -955,9 +951,10 @@ namespace hip_field {
                 t[i+j] = uint32_t(x);
                 carry = x >> 32;
             }
-            uint32_t c32 = uint32_t(carry);
+            uint32_t c32 = 0;
+            t[i+8] = __builtin_addc(t[i+8], uint32_t(carry), 0, &c32);
             #pragma unroll
-            for (int k = i+8; k < 17; ++k) {
+            for (int k = i+9; k < 17; ++k) {
                 t[k] = __builtin_addc(t[k], 0, c32, &c32);
             }
         }
@@ -971,21 +968,18 @@ namespace hip_field {
                 t[i+j] = uint32_t(x);
                 carry = x >> 32;
             }
-            uint32_t c32 = uint32_t(carry);
+            uint32_t c32 = 0;
+            t[i+8] = __builtin_addc(t[i+8], uint32_t(carry), 0, &c32);
             #pragma unroll
-            for (int k = i+8; k < 17; ++k) {
+            for (int k = i+9; k < 17; ++k) {
                 t[k] = __builtin_addc(t[k], 0, c32, &c32);
             }
         }
         #pragma unroll
         for (int i = 0; i < 8; ++i) r_out.v[i] = t[i+8];
-        if (t[16]) {
-            r_out = raw_add(r_out, mont_one());
-        } else {
-            uint32_t carry_sub;
-            U256 sub_r = raw_sub(r_out, prime, &carry_sub);
-            if (carry_sub == 0) r_out = sub_r;
-        }
+        uint32_t borrow;
+        U256 sub_r = raw_sub(r_out, prime, &borrow);
+        if (t[16] || borrow == 0) r_out = sub_r;
     #else
         uint32_t t[17] = {};
         for (int i = 0; i < 8; ++i) {
@@ -1016,11 +1010,9 @@ namespace hip_field {
             }
         }
         for (int i = 0; i < 8; ++i) r_out.v[i] = t[i+8];
-        if (t[16]) {
-            r_out = raw_add(r_out, mont_one());
-        } else if (compare(r_out, prime) >= 0) {
-            r_out = raw_sub(r_out, prime);
-        }
+        uint32_t borrow;
+        U256 sub_r = raw_sub(r_out, prime, &borrow);
+        if (t[16] || borrow == 0) r_out = sub_r;
     #endif
         return r_out;
     }
