@@ -686,6 +686,89 @@ void batchJacobianToAffine(ECPointAffine* aff_out, const ECPointJacobian* jac_in
     }
 }
 
+void batchWalkersToGpuState(
+    hip_walk::State* states_out,
+    const WalkState* const* walkers_in,
+    size_t count
+) {
+    if (count == 0) return;
+    std::vector<uint64_t> scratch_prefix(count * 4);
+    std::vector<uint64_t> scratch_inv(count * 4);
+
+    if (jacobianIsInfinity(&walkers_in[0]->R)) {
+        memcpy(&scratch_prefix[0], ONE_MONT, 32);
+    } else {
+        memcpy(&scratch_prefix[0], walkers_in[0]->R.Z, 32);
+    }
+
+    for (size_t i = 1; i < count; i++) {
+        if (jacobianIsInfinity(&walkers_in[i]->R)) {
+            memcpy(&scratch_prefix[i * 4], &scratch_prefix[(i - 1) * 4], 32);
+        } else {
+            modMulMontP(&scratch_prefix[i * 4], &scratch_prefix[(i - 1) * 4], walkers_in[i]->R.Z);
+        }
+    }
+
+    uint64_t total_inv[4];
+    modExpMontP(total_inv, &scratch_prefix[(count - 1) * 4], SUB2_FP);
+    uint64_t current_inv[4];
+    memcpy(current_inv, total_inv, 32);
+
+    for (size_t i = count - 1; i > 0; i--) {
+        if (jacobianIsInfinity(&walkers_in[i]->R)) {
+            continue;
+        }
+        modMulMontP(&scratch_inv[i * 4], current_inv, &scratch_prefix[(i - 1) * 4]);
+        modMulMontP(current_inv, current_inv, walkers_in[i]->R.Z);
+    }
+
+    if (!jacobianIsInfinity(&walkers_in[0]->R)) {
+        memcpy(&scratch_inv[0], current_inv, 32);
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        const WalkState& w = *walkers_in[i];
+        hip_walk::State& state = states_out[i];
+        if (jacobianIsInfinity(&w.R)) {
+            state.point.infinity = 1;
+            state.point.x = hip_field::U256{};
+            state.point.y = hip_field::U256{};
+            state.point.z = hip_field::mont_one();
+        } else {
+            const uint64_t* z_inv = &scratch_inv[i * 4];
+            uint64_t z2[4], z3[4], tmp_x[4], tmp_y[4];
+            modMulMontP(z2, z_inv, z_inv);
+            modMulMontP(tmp_x, w.R.X, z2);
+            modMulMontP(z3, z2, z_inv);
+            modMulMontP(tmp_y, w.R.Y, z3);
+            state.point.x = hip_field::from64(tmp_x);
+            state.point.y = hip_field::from64(tmp_y);
+            state.point.z = hip_field::mont_one();
+            state.point.infinity = 0;
+        }
+        state.a = hip_field::from64(w.a.limbs);
+        state.b = hip_field::from64(w.b.limbs);
+        state.snapshot_x = hip_field::from64(w.snapshot_x);
+        state.snapshot_steps = w.snapshot_steps;
+        state.last_jump = 0xffffffffu;
+    }
+}
+
+void batchWalkersContiguousToGpuState(
+    hip_walk::State* states_out,
+    const WalkState* walkers_base,
+    size_t count
+) {
+    constexpr size_t BATCH_CHUNK = 4096;
+    for (size_t offset = 0; offset < count; offset += BATCH_CHUNK) {
+        size_t cur = std::min(BATCH_CHUNK, count - offset);
+        std::vector<const WalkState*> ptrs(cur);
+        for (size_t j = 0; j < cur; ++j) ptrs[j] = &walkers_base[offset + j];
+        batchWalkersToGpuState(&states_out[offset], ptrs.data(), cur);
+    }
+}
+
+
 uint256_t lambda(std::string target_pubkey_hex, int key_range, int WALKERS, int DP_BITS, const std::string& snapoint_path, int snaptime_sec) {
     std::atomic<bool> search_in_progress(true);
     std::atomic<int> loaded_walkers{0};
@@ -763,16 +846,21 @@ uint256_t lambda(std::string target_pubkey_hex, int key_range, int WALKERS, int 
 
     //std::cout << "m = " << std::fixed << std::setprecision(15) << m << std::endl;
 
+    std::vector<ECPointJacobian> step_jac(N_STEPS);
     for (uint32_t i = 0; i < N_STEPS; i++) {
         localStepTable[i].a = rng_mersenne_twister(uint256_t{0}, stepSize, salt);
         localStepTable[i].a.limbs[0] &= 0xFFFFFFFFFFFFFFFEULL;
         localStepTable[i].b = uint256_t{};
         uint64_t a_tmp[4];
         uint256_to_uint64_array(a_tmp, localStepTable[i].a);
-        jacobianScalarMultPhi(&localStepTable[i].point, preCompG, preCompGphi, a_tmp, windowSize);
-        ECPointAffine aff_step;
-        jacobianToAffine(&aff_step, &localStepTable[i].point);
-        affineToJacobian(&localStepTable[i].point, &aff_step);
+        jacobianScalarMultPhi(&step_jac[i], preCompG, preCompGphi, a_tmp, windowSize);
+    }
+    std::vector<ECPointAffine> step_aff(N_STEPS);
+    std::vector<uint64_t> step_prefix(N_STEPS * 4);
+    std::vector<uint64_t> step_inv(N_STEPS * 4);
+    batchJacobianToAffine(step_aff.data(), step_jac.data(), N_STEPS, step_prefix.data(), step_inv.data());
+    for (uint32_t i = 0; i < N_STEPS; i++) {
+        affineToJacobian(&localStepTable[i].point, &step_aff[i]);
     }
 
     DPTable dp_table;
@@ -1077,10 +1165,23 @@ uint256_t lambda(std::string target_pubkey_hex, int key_range, int WALKERS, int 
     hip_walk::Context* gpu_context = nullptr;
     auto to_gpu_state = [](const WalkState& w) {
         hip_walk::State state{};
-        state.point.x = hip_field::from64(w.R.X);
-        state.point.y = hip_field::from64(w.R.Y);
-        state.point.z = hip_field::from64(w.R.Z);
-        state.point.infinity = w.R.infinity;
+        if (jacobianIsInfinity(&w.R)) {
+            state.point.infinity = 1;
+            state.point.x = hip_field::U256{};
+            state.point.y = hip_field::U256{};
+            state.point.z = hip_field::mont_one();
+        } else {
+            uint64_t z_inv[4], z2[4], z3[4], tmp_x[4], tmp_y[4];
+            modExpMontP(z_inv, w.R.Z, SUB2_FP);
+            modMulMontP(z2, z_inv, z_inv);
+            modMulMontP(tmp_x, w.R.X, z2);
+            modMulMontP(z3, z2, z_inv);
+            modMulMontP(tmp_y, w.R.Y, z3);
+            state.point.x = hip_field::from64(tmp_x);
+            state.point.y = hip_field::from64(tmp_y);
+            state.point.z = hip_field::mont_one();
+            state.point.infinity = 0;
+        }
         state.a = hip_field::from64(w.a.limbs);
         state.b = hip_field::from64(w.b.limbs);
         state.snapshot_x = hip_field::from64(w.snapshot_x);
@@ -1090,19 +1191,22 @@ uint256_t lambda(std::string target_pubkey_hex, int key_range, int WALKERS, int 
     };
     
     auto from_gpu_state = [](WalkState& w, const hip_walk::State& state) {
-        hip_field::to64(w.R.X, state.point.x);
-        hip_field::to64(w.R.Y, state.point.y);
-        hip_field::to64(w.R.Z, state.point.z);
-        w.R.infinity = state.point.infinity;
+        uint64_t aff_x[4], aff_y[4];
+        hip_field::to64(aff_x, state.point.x);
+        hip_field::to64(aff_y, state.point.y);
+        ECPointAffine aff{};
+        fromMontgomeryP(aff.x, aff_x);
+        fromMontgomeryP(aff.y, aff_y);
+        aff.infinity = state.point.infinity;
+        affineToJacobian(&w.R, &aff);
         hip_field::to64(w.a.limbs, state.a);
         hip_field::to64(w.b.limbs, state.b);
         hip_field::to64(w.snapshot_x, state.snapshot_x);
         w.snapshot_steps = state.snapshot_steps;
     };
 
-    std::vector<hip_walk::State> initial_states;
-    initial_states.reserve(walkers_state.size());
-    for (const WalkState& w : walkers_state) initial_states.push_back(to_gpu_state(w));
+    std::vector<hip_walk::State> initial_states(walkers_state.size());
+    batchWalkersContiguousToGpuState(initial_states.data(), walkers_state.data(), walkers_state.size());
 
     std::vector<hip_walk::Step> gpu_steps(N_STEPS);
     for (uint32_t i = 0; i < N_STEPS; ++i) {
@@ -1122,6 +1226,9 @@ uint256_t lambda(std::string target_pubkey_hex, int key_range, int WALKERS, int 
         try {
             std::vector<hip_walk::Result> events;
             std::vector<hip_walk::State> device_states;
+            std::vector<bool> walker_reset;
+            std::vector<uint32_t> reset_walker_ids;
+            std::vector<const WalkState*> reset_walker_ptrs;
             while (search_in_progress.load(std::memory_order_acquire)) {
                 bool snapshot_pending = false;
                 {
@@ -1139,24 +1246,32 @@ uint256_t lambda(std::string target_pubkey_hex, int key_range, int WALKERS, int 
                     continue;
                 }
 
-                constexpr int BATCH_STEPS = 1024;
+                constexpr int BATCH_STEPS = 64;
                 if (!hip_walk::advance(gpu_context, BATCH_STEPS, DP_BITS, events)) {
                     throw std::runtime_error(hip_walk::last_error());
                 }
-                uint64_t steps_done = (uint64_t)(WALKERS - events.size()) * BATCH_STEPS;
-                for (const auto& event : events) steps_done += event.steps_done;
+                uint64_t steps_done = (uint64_t)WALKERS * BATCH_STEPS;
+                for (const auto& event : events) {
+                    if (event.kind == 2) {
+                        steps_done -= (BATCH_STEPS - event.steps_done);
+                    }
+                }
                 total_iters.fetch_add(steps_done, std::memory_order_relaxed);
 
+                walker_reset.assign(WALKERS, false);
+                reset_walker_ids.clear();
+                reset_walker_ptrs.clear();
                 for (size_t i = 0; i < events.size() && search_in_progress.load(std::memory_order_acquire); ++i) {
                     const auto& event = events[i];
-                    if (event.kind == 0) continue;
+                    if (event.kind == 0 || event.walker_id >= WALKERS) continue;
+                    if (walker_reset[event.walker_id]) continue;
                     WalkState* w = &walkers_state[event.walker_id];
                     if (event.kind == 2) {
                         reset(w, w->walk_id % 2 == 0);
+                        walker_reset[event.walker_id] = true;
                         total_cycles.fetch_add(1, std::memory_order_relaxed);
-                        if (!hip_walk::write_state(gpu_context, event.walker_id, to_gpu_state(*w))) {
-                            throw std::runtime_error(hip_walk::last_error());
-                        }
+                        reset_walker_ids.push_back(event.walker_id);
+                        reset_walker_ptrs.push_back(w);
                         continue;
                     }
                     hip_field::to64(w->a.limbs, event.a);
@@ -1164,7 +1279,16 @@ uint256_t lambda(std::string target_pubkey_hex, int key_range, int WALKERS, int 
                     uint64_t x[4];
                     hip_field::to64(x, event.x);
                     if (process_dp(w, x)) {
-                        if (!hip_walk::write_state(gpu_context, event.walker_id, to_gpu_state(*w))) {
+                        walker_reset[event.walker_id] = true;
+                        reset_walker_ids.push_back(event.walker_id);
+                        reset_walker_ptrs.push_back(w);
+                    }
+                }
+                if (!reset_walker_ids.empty()) {
+                    std::vector<hip_walk::State> reset_states(reset_walker_ids.size());
+                    batchWalkersToGpuState(reset_states.data(), reset_walker_ptrs.data(), reset_walker_ids.size());
+                    for (size_t r = 0; r < reset_walker_ids.size(); ++r) {
+                        if (!hip_walk::write_state(gpu_context, reset_walker_ids[r], reset_states[r])) {
                             throw std::runtime_error(hip_walk::last_error());
                         }
                     }
